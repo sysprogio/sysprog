@@ -599,11 +599,90 @@ test_big_author(void)
 #endif
 }
 
+static void
+test_server_feed(void)
+{
+#if NEED_SERVER_FEED
+	unit_test_start();
+
+	struct chat_server *s = chat_server_new();
+	unit_fail_if(chat_server_listen(s, 0) != 0);
+	uint16_t port = server_get_port(s);
+
+	struct chat_client *c1 = chat_client_new("c1");
+	unit_fail_if(chat_client_connect(c1, make_addr_str(port)) != 0);
+
+	struct chat_client *c2 = chat_client_new("c2");
+	unit_fail_if(chat_client_connect(c2, make_addr_str(port)) != 0);
+
+	const char *data = "msg1\nmsg2\nmsg3";
+	unit_check(chat_server_feed(s, data, strlen(data)) == 0, "feed server");
+	server_consume_events(s);
+
+	struct chat_message *msg = client_pop_next_blocking(c1, s);
+	unit_check(msg != NULL, "c1 got msg");
+	unit_check(strcmp(msg->data, "msg1") == 0, "msg1");
+	unit_check(author_is_eq(msg, "server"), "msg1 author");
+	chat_message_delete(msg);
+
+	msg = client_pop_next_blocking(c1, s);
+	unit_check(msg != NULL, "c1 got msg");
+	unit_check(strcmp(msg->data, "msg2") == 0, "msg2");
+	unit_check(author_is_eq(msg, "server"), "msg2 author");
+	chat_message_delete(msg);
+
+	msg = client_pop_next_blocking(c2, s);
+	unit_check(msg != NULL, "c2 got msg");
+	unit_check(strcmp(msg->data, "msg1") == 0, "msg1");
+	unit_check(author_is_eq(msg, "server"), "msg1 author");
+	chat_message_delete(msg);
+
+	msg = client_pop_next_blocking(c2, s);
+	unit_check(msg != NULL, "c2 got msg");
+	unit_check(strcmp(msg->data, "msg2") == 0, "msg2");
+	unit_check(author_is_eq(msg, "server"), "msg2 author");
+	chat_message_delete(msg);
+
+	unit_check(chat_client_update(c1, 0) == CHAT_ERR_TIMEOUT,
+		   "no more events in c1");
+	unit_check(chat_client_update(c2, 0) == CHAT_ERR_TIMEOUT,
+		   "no more events in c2");
+
+	// Feed just one byte from the string, yes.
+	unit_check(chat_server_feed(s, "\ntail\n", 1) == 0, "feed server");
+	server_consume_events(s);
+
+	msg = client_pop_next_blocking(c1, s);
+	unit_check(msg != NULL, "c1 got msg");
+	unit_check(strcmp(msg->data, "msg3") == 0, "msg3");
+	unit_check(author_is_eq(msg, "server"), "msg3 author");
+	chat_message_delete(msg);
+
+	msg = client_pop_next_blocking(c2, s);
+	unit_check(msg != NULL, "c2 got msg");
+	unit_check(strcmp(msg->data, "msg3") == 0, "msg3");
+	unit_check(author_is_eq(msg, "server"), "msg3 author");
+	chat_message_delete(msg);
+
+	unit_check(chat_client_update(c1, 0) == CHAT_ERR_TIMEOUT,
+		   "no more events in c1");
+	unit_check(chat_client_update(c2, 0) == CHAT_ERR_TIMEOUT,
+		   "no more events in c2");
+
+	chat_client_delete(c1);
+	chat_client_delete(c2);
+	chat_server_delete(s);
+
+	unit_test_finish();
+#endif
+}
+
 int
 main(void)
 {
 	unit_test_start();
 
+	test_server_feed();
 	test_basic();
 	test_big_messages();
 	test_multi_feed();
