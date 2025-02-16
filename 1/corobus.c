@@ -232,6 +232,8 @@ coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 	data_vector_append(&ch->data, data);
 	wakeup_queue_wakeup_first(&ch->recv_queue);
 
+	coro_bus_errno_set(CORO_BUS_ERR_NONE);
+
 	return 0;
 }
 
@@ -306,21 +308,85 @@ coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 int
 coro_bus_broadcast(struct coro_bus *bus, unsigned data)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)data;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	int cnt = 0;
+
+	for (int i = 0; i < bus->channel_count; i++) {
+		if (bus->channels[i] == NULL) {
+			continue;
+		}
+
+		struct coro_bus_channel *ch = bus->channels[i];
+
+		while (ch->data.size >= ch->size_limit) {
+			wakeup_queue_suspend_this(&ch->send_queue);
+
+			if (is_incorrect_channel(bus, i)) {
+				coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+				return -1;
+			}
+		}
+
+		cnt++;
+	}
+
+	if (cnt == 0) {
+		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+		return -1;
+	}
+
+	for (int i = 0; i < bus->channel_count; i++) {
+		if (bus->channels[i] == NULL) {
+			continue;
+		}
+
+		coro_bus_send(bus, i, data);
+
+		if (coro_bus_errno() == CORO_BUS_ERR_NO_CHANNEL) {
+			return -1;
+		}
+	}
+
+	return 0;
 }
 
 int
 coro_bus_try_broadcast(struct coro_bus *bus, unsigned data)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)data;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	int cnt = 0;
+
+	for (int i = 0; i < bus->channel_count; i++) {
+		if (bus->channels[i] == NULL) {
+			continue;
+		}
+
+		struct coro_bus_channel *ch = bus->channels[i];
+
+		if (ch->data.size >= ch->size_limit) {
+			coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
+			return -1;
+		}
+
+		cnt++;
+	}
+
+	if (cnt == 0) {
+		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+		return -1;
+	}
+
+	for (int i = 0; i < bus->channel_count; i++) {
+		if (bus->channels[i] == NULL) {
+			continue;
+		}
+
+		coro_bus_send(bus, i, data);
+
+		if (coro_bus_errno() == CORO_BUS_ERR_NO_CHANNEL) {
+			return -1;
+		}
+	}
+
+	return 0;
 }
 
 #endif
