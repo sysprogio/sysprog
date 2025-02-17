@@ -8,7 +8,7 @@
  * header, because it is used by tests.
  */
 #define NEED_BROADCAST 1
-#define NEED_BATCH 0
+#define NEED_BATCH 1
 
 enum coro_bus_error_code {
 	CORO_BUS_ERR_NONE = 0,

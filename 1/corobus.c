@@ -213,26 +213,9 @@ coro_bus_channel_close(struct coro_bus *bus, int channel)
 int
 coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 {
-	if (is_incorrect_channel(bus, channel)) {
-		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+	if (coro_bus_send_v(bus, channel, &data, 1) != 1) {
 		return -1;
 	}
-
-	struct coro_bus_channel *ch = bus->channels[channel];
-
-	while (ch->data.size >= ch->size_limit) {
-		wakeup_queue_suspend_this(&ch->send_queue);
-
-		if (is_incorrect_channel(bus, channel)) {
-			coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-			return -1;
-		}
-	}
-
-	data_vector_append(&ch->data, data);
-	wakeup_queue_wakeup_first(&ch->recv_queue);
-
-	coro_bus_errno_set(CORO_BUS_ERR_NONE);
 
 	return 0;
 }
@@ -240,20 +223,9 @@ coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 int
 coro_bus_try_send(struct coro_bus *bus, int channel, unsigned data)
 {
-	if (is_incorrect_channel(bus, channel)) {
-		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+	if (coro_bus_try_send_v(bus, channel, &data, 1) != 1) {
 		return -1;
 	}
-
-	struct coro_bus_channel *ch = bus->channels[channel];
-
-	if (ch->data.size >= ch->size_limit) {
-		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
-		return -1;
-	}
-
-	data_vector_append(&ch->data, data);
-	wakeup_queue_wakeup_first(&ch->recv_queue);
 
 	return 0;
 }
@@ -261,23 +233,9 @@ coro_bus_try_send(struct coro_bus *bus, int channel, unsigned data)
 int
 coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 {
-	if (is_incorrect_channel(bus, channel)) {
-		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+	if (coro_bus_recv_v(bus, channel, data, 1) != 1) {
 		return -1;
 	}
-
-	struct coro_bus_channel *ch = bus->channels[channel];
-	while (ch->data.size == 0) {
-		wakeup_queue_suspend_this(&ch->recv_queue);
-
-		if (is_incorrect_channel(bus, channel)) {
-			coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-			return -1;
-		}
-	}
-
-	*data = data_vector_pop_first(&ch->data);
-	wakeup_queue_wakeup_first(&ch->send_queue);
 
 	return 0;
 }
@@ -285,19 +243,9 @@ coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 int
 coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 {
-	if (is_incorrect_channel(bus, channel)) {
-		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+	if (coro_bus_try_recv_v(bus, channel, data, 1) != 1) {
 		return -1;
 	}
-
-	struct coro_bus_channel *ch = bus->channels[channel];
-	if (ch->data.size == 0) {
-		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
-		return -1;
-	}
-
-	*data = data_vector_pop_first(&ch->data);
-	wakeup_queue_wakeup_first(&ch->send_queue);
 
 	return 0;
 }
@@ -396,49 +344,113 @@ coro_bus_try_broadcast(struct coro_bus *bus, unsigned data)
 int
 coro_bus_send_v(struct coro_bus *bus, int channel, const unsigned *data, unsigned count)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)channel;
-	(void)data;
-	(void)count;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	if (is_incorrect_channel(bus, channel)) {
+		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+		return -1;
+	}
+
+	struct coro_bus_channel *ch = bus->channels[channel];
+
+	while (ch->data.size >= ch->size_limit) {
+		wakeup_queue_suspend_this(&ch->send_queue);
+
+		if (is_incorrect_channel(bus, channel)) {
+			coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+			return -1;
+		}
+	}
+
+	size_t empty_count = ch->size_limit - ch->data.size;
+	empty_count = empty_count > count ? count : empty_count;
+
+	for (size_t i = 0; i < empty_count; i++) {
+		data_vector_append(&ch->data, data[i]);
+		wakeup_queue_wakeup_first(&ch->recv_queue);
+	}
+
+	coro_bus_errno_set(CORO_BUS_ERR_NONE);
+
+	return (int)empty_count;
 }
 
 int
 coro_bus_try_send_v(struct coro_bus *bus, int channel, const unsigned *data, unsigned count)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)channel;
-	(void)data;
-	(void)count;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	if (is_incorrect_channel(bus, channel)) {
+		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+		return -1;
+	}
+
+	struct coro_bus_channel *ch = bus->channels[channel];
+
+	if (ch->data.size >= ch->size_limit) {
+		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
+		return -1;
+	}
+
+	size_t empty_count = ch->size_limit - ch->data.size;
+	empty_count = empty_count > count ? count : empty_count;
+
+	for (size_t i = 0; i < empty_count; i++) {
+		data_vector_append(&ch->data, data[i]);
+		wakeup_queue_wakeup_first(&ch->recv_queue);
+	}
+
+	return (int)empty_count;
 }
 
 int
 coro_bus_recv_v(struct coro_bus *bus, int channel, unsigned *data, unsigned capacity)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)channel;
-	(void)data;
-	(void)capacity;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	if (is_incorrect_channel(bus, channel)) {
+		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+		return -1;
+	}
+
+	struct coro_bus_channel *ch = bus->channels[channel];
+	while (ch->data.size == 0) {
+		wakeup_queue_suspend_this(&ch->recv_queue);
+
+		if (is_incorrect_channel(bus, channel)) {
+			coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+			return -1;
+		}
+	}
+
+	size_t real_capacity = capacity > ch->data.size ? ch->data.size : capacity;
+
+	for (size_t i = 0; i < real_capacity; i++) {
+		data[i] = data_vector_pop_first(&ch->data);
+		wakeup_queue_wakeup_first(&ch->send_queue);
+	}
+
+	wakeup_queue_wakeup_first(&ch->recv_queue);
+
+	return (int)real_capacity;
 }
 
 int
 coro_bus_try_recv_v(struct coro_bus *bus, int channel, unsigned *data, unsigned capacity)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)channel;
-	(void)data;
-	(void)capacity;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	if (is_incorrect_channel(bus, channel)) {
+		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+		return -1;
+	}
+
+	struct coro_bus_channel *ch = bus->channels[channel];
+	if (ch->data.size == 0) {
+		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
+		return -1;
+	}
+
+	size_t real_capacity = capacity > ch->data.size ? ch->data.size : capacity;
+
+	for (size_t i = 0; i < real_capacity; i++) {
+		data[i] = data_vector_pop_first(&ch->data);
+		wakeup_queue_wakeup_first(&ch->send_queue);
+	}
+
+	return (int)real_capacity;
 }
 
 #endif
