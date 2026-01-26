@@ -62,12 +62,15 @@ the API.
   the cmake option `ENABLE_LEAK_CHECKS`. Showing zero leak reports
   from Valgrind or ASAN is not enough - they often miss the leaks.
 
+- You can not use `malloc()`, `realloc()`, `calloc()`, and so on.
+  You can only use `new` and `delete` from C++.
+
 - Can not change test.cpp, libcoro.cpp, libcoro.h.
 
 -------------------------- Relaxations ---------------------------
 
-- You can assume, that memory allocation functions like
-  new/delete/malloc()/realloc()/calloc() never fail.
+- You can assume, that memory allocation functions `new` and
+  `delete` never fail.
 
 - Use can use intrusive list container defined in utils/rlist.h.
 

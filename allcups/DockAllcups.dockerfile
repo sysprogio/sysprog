@@ -3,7 +3,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     TZ=Etc/UTC && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-    tzdata unzip jq python3 clang make
+    tzdata unzip jq python3 clang make cmake
 RUN ln /usr/bin/clang /usr/bin/gcc
 RUN mkdir /sysprog
 RUN mkdir /sysprog/solution

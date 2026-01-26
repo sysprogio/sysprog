@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 project(Shell CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -38,5 +38,5 @@ if(NOT ENABLE_GLOB_SEARCH)
 else()
     file(GLOB TEST_SOURCES *.cpp)
     list(APPEND TEST_SOURCES ${UTILS_SOURCES})
-    add_executable(test ${TEST_SOURCES})
+    add_executable(mybash ${TEST_SOURCES})
 endif()

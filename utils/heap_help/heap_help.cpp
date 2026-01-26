@@ -5,6 +5,11 @@
 #include <map>
 #include <new>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <stdio.h>
+
+#include <mutex>
 
 namespace
 {
@@ -328,6 +333,13 @@ operator new(std::size_t count, std::align_val_t al)
 
 void
 operator delete(void *ptr) noexcept
+{
+	glob_hh.untrace(ptr);
+	std::free(ptr);
+}
+
+void
+operator delete(void *ptr, std::size_t) noexcept
 {
 	glob_hh.untrace(ptr);
 	std::free(ptr);

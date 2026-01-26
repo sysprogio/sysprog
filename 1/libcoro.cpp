@@ -9,6 +9,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <errno.h>
+#include <stdint.h>
 #include <string.h>
 
 #define handle_error() do {														\

@@ -48,7 +48,7 @@ struct file {
 static rlist file_list = RLIST_HEAD_INITIALIZER(file_list);
 
 struct filedesc {
-	file *file;
+	file *atfile;
 
 	/* PUT HERE OTHER MEMBERS */
 };
