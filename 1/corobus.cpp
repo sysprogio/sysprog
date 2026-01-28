@@ -75,7 +75,7 @@ struct coro_bus_channel {
 static struct coro_bus_channel*
 coro_bus_channel_create(size_t size_limit)
 {
-    struct coro_bus_channel *channel = (struct coro_bus_channel*)malloc(sizeof(struct coro_bus_channel));
+    struct coro_bus_channel *channel = new coro_bus_channel();
 
     channel->size_limit = size_limit;
     wakeup_queue_init(&channel->send_queue);
@@ -115,9 +115,9 @@ coro_bus_errno_set(enum coro_bus_error_code err)
 struct coro_bus *
 coro_bus_new(void)
 {
-	struct coro_bus *bus = (struct coro_bus*)malloc(sizeof(struct coro_bus));
+	struct coro_bus *bus = new coro_bus();
     bus->channel_count = DEFAULT_CHANNEL_COUNT_SIZE;
-	bus->channels = (struct coro_bus_channel**)malloc(bus->channel_count * sizeof(struct coro_bus_channel*));
+	bus->channels = new coro_bus_channel*[bus->channel_count];
 
 	for (int i = 0; i < bus->channel_count; i++) {
         bus->channels[i] = NULL;
@@ -129,10 +129,10 @@ void
 coro_bus_delete(struct coro_bus *bus)
 {
 	for (int i = 0; i < bus->channel_count; i++) {
-		free(bus->channels[i]);
+		delete bus->channels[i];
 	}
-	free(bus->channels);
-	free(bus);
+	delete[] bus->channels;
+	delete bus;
 }
 
 int
@@ -202,7 +202,7 @@ coro_bus_channel_close(struct coro_bus *bus, int channel)
 	}
 	coro_yield();
 
-	free(ch);
+	delete ch;
 }
 
 int
@@ -286,8 +286,8 @@ coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 		}
 
 		
-		*data = std::move(ch->data.back());
-		ch->data.pop_back();
+		*data = std::move(ch->data.front());
+		ch->data.erase(ch->data.begin());
 
 		if (!is_wakeup_queue_empty(&ch->send_queue)) {
 			wakeup_queue_wakeup_first(&ch->send_queue);
@@ -300,6 +300,8 @@ coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 int
 coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 {
+	assert(data != NULL);
+
 	struct coro_bus_channel *ch = bus->channels[channel];
 	if (ch == NULL) {
 		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
@@ -310,8 +312,8 @@ coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
 		return -1;
 	}
-	*data = std::move(ch->data.back());
-	ch->data.pop_back();
+	*data = std::move(ch->data.front());
+	ch->data.erase(ch->data.begin());
 
 	if (!is_wakeup_queue_empty(&ch->send_queue)) {
 		wakeup_queue_wakeup_first(&ch->send_queue);
