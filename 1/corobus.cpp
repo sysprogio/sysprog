@@ -84,13 +84,7 @@ coro_bus_channel_create(size_t size_limit)
     return channel;
 }
 
-// static void
-// coro_bus_channel_destroy(struct coro_bus_channel* _ch)
-// {
-//     // TODO: remove.
-// }
-
-#define DEFAULT_CHANNEL_COUNT_SIZE 100
+#define MAX_CHANNEL_COUNT_SIZE 128
 
 struct coro_bus {
 	struct coro_bus_channel **channels;
@@ -115,7 +109,7 @@ struct coro_bus *
 coro_bus_new(void)
 {
 	struct coro_bus *bus = new coro_bus();
-    bus->channel_count = DEFAULT_CHANNEL_COUNT_SIZE;
+    bus->channel_count = MAX_CHANNEL_COUNT_SIZE;
 	bus->channels = new coro_bus_channel*[bus->channel_count];
 
 	for (int i = 0; i < bus->channel_count; i++) {
