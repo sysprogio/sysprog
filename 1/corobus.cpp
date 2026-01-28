@@ -26,10 +26,7 @@ struct wakeup_queue {
 static bool
 is_wakeup_queue_empty(struct wakeup_queue *queue)
 {
-	if (queue == NULL) {
-		return true;
-	}
-	return rlist_empty(&queue->coros);
+	return queue == NULL || rlist_empty(&queue->coros);
 }
 
 static void
@@ -112,9 +109,7 @@ coro_bus_new(void)
     bus->channel_count = MAX_CHANNEL_COUNT_SIZE;
 	bus->channels = new coro_bus_channel*[bus->channel_count];
 
-	for (int i = 0; i < bus->channel_count; i++) {
-        bus->channels[i] = NULL;
-    }
+	memset(bus->channels, 0, bus->channel_count * sizeof(coro_bus_channel*));
     return bus;
 }
 
@@ -219,18 +214,14 @@ coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 			return -1;
 		}
 
-		if (ch->data.size() == ch->size_limit) {
-			wakeup_queue_suspend_this(&ch->send_queue);
-			continue;
+		if (ch->data.size() < ch->size_limit) {
+			ch->data.push_back(data);
+			if (!is_wakeup_queue_empty(&ch->recv_queue)) {
+				wakeup_queue_wakeup_first(&ch->recv_queue);
+			}
+			return 0;
 		}
-		// send
-		ch->data.push_back(data);
-
-
-		if (!is_wakeup_queue_empty(&ch->recv_queue)) {
-			wakeup_queue_wakeup_first(&ch->recv_queue);
-		}
-		return 0;
+		wakeup_queue_suspend_this(&ch->send_queue);
 	}
 }
 
@@ -248,11 +239,10 @@ coro_bus_try_send(struct coro_bus *bus, int channel, unsigned data)
 		return -1;
 	}
 
-	if (ch->data.size() == ch->size_limit) {
+	if (ch->data.size() >= ch->size_limit) {
 		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
 		return -1;
 	}
-	// send
 	ch->data.push_back(data);
 
 	if (!is_wakeup_queue_empty(&ch->recv_queue)) {
@@ -273,20 +263,15 @@ coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 			return -1;
 		}
 
-		if (ch->data.size() == 0) {
-			wakeup_queue_suspend_this(&ch->recv_queue);
-			continue;
+		if (!ch->data.empty()) {
+			*data = std::move(ch->data.front());
+			ch->data.pop_front();
+			if (!is_wakeup_queue_empty(&ch->send_queue)) {
+				wakeup_queue_wakeup_first(&ch->send_queue);
+			}
+			return 0;
 		}
-
-		
-		*data = std::move(ch->data.front());
-		ch->data.pop_front();
-
-		if (!is_wakeup_queue_empty(&ch->send_queue)) {
-			wakeup_queue_wakeup_first(&ch->send_queue);
-		}
-
-		return 0;
+		wakeup_queue_suspend_this(&ch->recv_queue);
 	}
 }
 
@@ -301,7 +286,7 @@ coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 		return -1;
 	}
 
-	if (ch->data.size() == 0) {
+	if (ch->data.empty()) {
 		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
 		return -1;
 	}
