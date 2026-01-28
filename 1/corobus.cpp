@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <vector>
+
 /**
  * One coroutine waiting to be woken up in a list of other
  * suspended coros.
@@ -67,7 +69,7 @@ struct coro_bus_channel {
 	/** Coroutines waiting until the channel is not empty. */
 	struct wakeup_queue recv_queue;
 	/** Message queue. */
-	/* std::vector/queue/deque/list/...<unsigned> data; */
+	std::vector<unsigned> data;
 };
 
 static struct coro_bus_channel*
@@ -78,18 +80,16 @@ coro_bus_channel_create(size_t size_limit)
     channel->size_limit = size_limit;
     wakeup_queue_init(&channel->send_queue);
     wakeup_queue_init(&channel->recv_queue);
-    data_vector_init(&channel->data);
+	channel->data.reserve(size_limit);
 
     return channel;
 }
 
-static void
-coro_bus_channel_destroy(struct coro_bus_channel* ch)
-{
-    // wakeup_queue_destroy(&ch->recv_queue);
-	// wakeup_queue_destroy(&ch->send_queue);
-	data_vector_destroy(&ch->data);
-}
+// static void
+// coro_bus_channel_destroy(struct coro_bus_channel* _ch)
+// {
+//     // TODO: remove.
+// }
 
 #define DEFAULT_CHANNEL_COUNT_SIZE 100
 
@@ -202,7 +202,6 @@ coro_bus_channel_close(struct coro_bus *bus, int channel)
 	}
 	coro_yield();
 
-	coro_bus_channel_destroy(ch);
 	free(ch);
 }
 
@@ -227,12 +226,12 @@ coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 			return -1;
 		}
 
-		if (ch->data.size == ch->size_limit) {
+		if (ch->data.size() == ch->size_limit) {
 			wakeup_queue_suspend_this(&ch->send_queue);
 			continue;
 		}
 		// send
-		data_vector_append(&ch->data, data);
+		ch->data.push_back(data);
 
 
 		if (!is_wakeup_queue_empty(&ch->recv_queue)) {
@@ -256,12 +255,12 @@ coro_bus_try_send(struct coro_bus *bus, int channel, unsigned data)
 		return -1;
 	}
 
-	if (ch->data.size == ch->size_limit) {
+	if (ch->data.size() == ch->size_limit) {
 		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
 		return -1;
 	}
 	// send
-	data_vector_append(&ch->data, data);
+	ch->data.push_back(data);
 
 	if (!is_wakeup_queue_empty(&ch->recv_queue)) {
 		wakeup_queue_wakeup_first(&ch->recv_queue);
@@ -272,6 +271,8 @@ coro_bus_try_send(struct coro_bus *bus, int channel, unsigned data)
 int
 coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 {
+	assert(data != NULL);
+
 	for (;;) {
 		struct coro_bus_channel *ch = bus->channels[channel];
 		if (ch == NULL) {
@@ -279,11 +280,14 @@ coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 			return -1;
 		}
 
-		if (ch->data.size == 0) {
+		if (ch->data.size() == 0) {
 			wakeup_queue_suspend_this(&ch->recv_queue);
 			continue;
 		}
-		*data = data_vector_pop_first(&ch->data);
+
+		
+		*data = std::move(ch->data.back());
+		ch->data.pop_back();
 
 		if (!is_wakeup_queue_empty(&ch->send_queue)) {
 			wakeup_queue_wakeup_first(&ch->send_queue);
@@ -302,11 +306,12 @@ coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 		return -1;
 	}
 
-	if (ch->data.size == 0) {
+	if (ch->data.size() == 0) {
 		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
 		return -1;
 	}
-	*data = data_vector_pop_first(&ch->data);
+	*data = std::move(ch->data.back());
+	ch->data.pop_back();
 
 	if (!is_wakeup_queue_empty(&ch->send_queue)) {
 		wakeup_queue_wakeup_first(&ch->send_queue);
