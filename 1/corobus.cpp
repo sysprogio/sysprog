@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <vector>
+#include <deque>
 
 /**
  * One coroutine waiting to be woken up in a list of other
@@ -69,7 +69,7 @@ struct coro_bus_channel {
 	/** Coroutines waiting until the channel is not empty. */
 	struct wakeup_queue recv_queue;
 	/** Message queue. */
-	std::vector<unsigned> data;
+	std::deque<unsigned> data;
 };
 
 static struct coro_bus_channel*
@@ -80,7 +80,6 @@ coro_bus_channel_create(size_t size_limit)
     channel->size_limit = size_limit;
     wakeup_queue_init(&channel->send_queue);
     wakeup_queue_init(&channel->recv_queue);
-	channel->data.reserve(size_limit);
 
     return channel;
 }
@@ -287,7 +286,7 @@ coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 
 		
 		*data = std::move(ch->data.front());
-		ch->data.erase(ch->data.begin());
+		ch->data.pop_front();
 
 		if (!is_wakeup_queue_empty(&ch->send_queue)) {
 			wakeup_queue_wakeup_first(&ch->send_queue);
@@ -313,7 +312,7 @@ coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 		return -1;
 	}
 	*data = std::move(ch->data.front());
-	ch->data.erase(ch->data.begin());
+	ch->data.pop_front();
 
 	if (!is_wakeup_queue_empty(&ch->send_queue)) {
 		wakeup_queue_wakeup_first(&ch->send_queue);
