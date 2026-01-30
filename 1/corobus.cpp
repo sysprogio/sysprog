@@ -23,12 +23,6 @@ struct wakeup_queue {
 	struct rlist coros;
 };
 
-static bool
-is_wakeup_queue_empty(struct wakeup_queue *queue)
-{
-	return queue == NULL || rlist_empty(&queue->coros);
-}
-
 static void
 wakeup_queue_init(struct wakeup_queue *queue)
 {
@@ -216,9 +210,7 @@ coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 
 		if (ch->data.size() < ch->size_limit) {
 			ch->data.push_back(data);
-			if (!is_wakeup_queue_empty(&ch->recv_queue)) {
-				wakeup_queue_wakeup_first(&ch->recv_queue);
-			}
+			wakeup_queue_wakeup_first(&ch->recv_queue);
 			return 0;
 		}
 		wakeup_queue_suspend_this(&ch->send_queue);
@@ -245,9 +237,7 @@ coro_bus_try_send(struct coro_bus *bus, int channel, unsigned data)
 	}
 	ch->data.push_back(data);
 
-	if (!is_wakeup_queue_empty(&ch->recv_queue)) {
-		wakeup_queue_wakeup_first(&ch->recv_queue);
-	}
+	wakeup_queue_wakeup_first(&ch->recv_queue);
 	return 0;
 }
 
@@ -266,9 +256,7 @@ coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 		if (!ch->data.empty()) {
 			*data = std::move(ch->data.front());
 			ch->data.pop_front();
-			if (!is_wakeup_queue_empty(&ch->send_queue)) {
-				wakeup_queue_wakeup_first(&ch->send_queue);
-			}
+			wakeup_queue_wakeup_first(&ch->send_queue);
 			return 0;
 		}
 		wakeup_queue_suspend_this(&ch->recv_queue);
@@ -293,9 +281,7 @@ coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 	*data = std::move(ch->data.front());
 	ch->data.pop_front();
 
-	if (!is_wakeup_queue_empty(&ch->send_queue)) {
-		wakeup_queue_wakeup_first(&ch->send_queue);
-	}
+	wakeup_queue_wakeup_first(&ch->send_queue);
 
 	return 0;
 }
