@@ -1,0 +1,25 @@
+# Build directories
+build/
+*/build/
+
+# CMake/generated build files
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/Makefile
+
+# Local binaries/artifacts
+1/test_bin
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.log
+*.dSYM/
+
+# IDE configs
+.idea/
