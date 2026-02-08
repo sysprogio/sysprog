@@ -289,24 +289,104 @@ coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 
 #if NEED_BROADCAST
 
-int
-coro_bus_broadcast(struct coro_bus *bus, unsigned data)
+static void
+coro_bus_broadcast_unsafe(struct coro_bus *bus, unsigned data)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)data;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	for (int i = 0; i < bus->channel_count; i++) {
+		struct coro_bus_channel *ch = bus->channels[i];
+		if (ch == NULL) {
+			continue;
+		}
+
+		assert(ch->data.size() < ch->size_limit);
+
+		ch->data.push_back(data);
+		wakeup_queue_wakeup_first(&ch->recv_queue);
+	}
 }
 
+static int
+coro_bus_find_first_full_channel(struct coro_bus *bus) 
+{
+	bool have_open_channels = false;
+	for (int i = 0; i < bus->channel_count; i++) {
+		struct coro_bus_channel *ch = bus->channels[i];
+		if (ch == NULL) {
+			continue;
+		}
+		have_open_channels = true;
+		
+		if (ch->data.size() >= ch->size_limit) {
+			return i;
+		}
+	}
+	if (!have_open_channels) {
+		return -1;
+	}
+	return bus->channel_count;
+}
+
+/**
+ * Send the given message to all the registered channels at once.
+ * If any of the channels are full, then the message isn't sent
+ * anywhere, and the coroutine is suspended until can submit the
+ * data to all the channels.
+ * @param bus Bus where the channels are located.
+ * @param data Data to send.
+ *
+ * @retval 0 Success. Sent to all the channels.
+ * @retval -1 Error. Check coro_bus_errno() for reason.
+ *     - CORO_BUS_ERR_NO_CHANNEL - no channels in the bus.
+ */
+int
+coro_bus_broadcast(struct coro_bus *bus, unsigned data)
+{	
+	for (;;) {
+		int full_channel_index = coro_bus_find_first_full_channel(bus);
+		if (full_channel_index == -1) {
+			coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+			return -1;
+		}
+
+		if (full_channel_index < bus->channel_count) {
+			struct coro_bus_channel *ch = bus->channels[full_channel_index];
+			wakeup_queue_suspend_this(&ch->send_queue);
+		} else {
+			break;
+		}
+	}
+
+	coro_bus_broadcast_unsafe(bus, data);
+	return 0;
+}
+
+/**
+ * Same as coro_bus_broadcast(), but if any of the channels are
+ * full, it instantly returns, not suspends.
+ * @param bus  Bus where the channels are located.
+ * @param data Data to send.
+ *
+ * @retval 0 Success. Sent to all the channels.
+ * @retval -1 Error. Check coro_bus_errno() for reason.
+ *     - CORO_BUS_ERR_NO_CHANNEL - no channels in the bus.
+ *     - CORO_BUS_ERR_WOULD_BLOCK - at least one channel is full.
+ */
 int
 coro_bus_try_broadcast(struct coro_bus *bus, unsigned data)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)data;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	int full_channel_index = coro_bus_find_first_full_channel(bus);
+	if (full_channel_index == -1) {
+		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+		return -1;
+	}
+
+	if (full_channel_index < bus->channel_count) {
+		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
+		return -1;
+	}
+	
+	coro_bus_broadcast_unsafe(bus, data);
+	return 0;
 }
 
 #endif
