@@ -9,6 +9,8 @@
 
 #include <deque>
 
+#define MAX_CHANNEL_COUNT_SIZE 128
+
 /**
  * One coroutine waiting to be woken up in a list of other
  * suspended coros.
@@ -74,8 +76,6 @@ coro_bus_channel_create(size_t size_limit)
 
     return channel;
 }
-
-#define MAX_CHANNEL_COUNT_SIZE 128
 
 struct coro_bus {
 	struct coro_bus_channel **channels;
