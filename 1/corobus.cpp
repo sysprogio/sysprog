@@ -185,7 +185,7 @@ coro_bus_channel_close(struct coro_bus *bus, int channel)
 }
 
 static int
-coro_bus_channel_send_general(struct coro_bus *bus, int channel, unsigned data, bool blocking)
+coro_bus_channel_send_general(struct coro_bus *bus, int channel, const unsigned *data, unsigned count, bool blocking)
 {
     for (;;) {
         struct coro_bus_channel *ch = bus->channels[channel];
@@ -195,9 +195,15 @@ coro_bus_channel_send_general(struct coro_bus *bus, int channel, unsigned data, 
         }
 
         if (ch->data.size() < ch->size_limit) {
-            ch->data.push_back(data);
-            wakeup_queue_wakeup_first(&ch->recv_queue);
-            return 0;
+			unsigned messages_to_send = std::min(
+				count,
+				(unsigned)(ch->size_limit - ch->data.size())
+			);
+			ch->data.insert(ch->data.end(), data, data + messages_to_send);
+
+			wakeup_queue_wakeup_first(&ch->recv_queue);
+
+            return messages_to_send;
         }
 
         if (!blocking) {
@@ -223,7 +229,8 @@ coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 	 * waiting, they would then wake each other up one by one
 	 * as lone as there is still space.
 	 */
-	return coro_bus_channel_send_general(bus, channel, data, true);
+	int ret = coro_bus_channel_send_general(bus, channel, &data, 1, true);
+	return ret == 1 ? 0 : ret;
 }
 
 int
@@ -234,13 +241,15 @@ coro_bus_try_send(struct coro_bus *bus, int channel, unsigned data)
 	 * Wakeup the first coro in the recv-queue! To let it know
 	 * there is data.
 	 */
-	return coro_bus_channel_send_general(bus, channel, data, false);
+	int ret = coro_bus_channel_send_general(bus, channel, &data, 1, false);
+	return ret == 1 ? 0 : ret;
 }
 
 static int
-coro_bus_channel_recv_internal(struct coro_bus *bus, int channel, unsigned *out, bool blocking)
+coro_bus_channel_recv_general(struct coro_bus *bus, int channel, unsigned *data, unsigned capacity, bool blocking)
 {
-    assert(out != NULL);
+    assert(data != NULL);
+    assert(capacity > 0);
 
     for (;;) {
         struct coro_bus_channel *ch = bus->channels[channel];
@@ -250,10 +259,18 @@ coro_bus_channel_recv_internal(struct coro_bus *bus, int channel, unsigned *out,
         }
 
         if (!ch->data.empty()) {
-            *out = ch->data.front();
-            ch->data.pop_front();
+			unsigned messages_to_recv = std::min(capacity, (unsigned)ch->data.size());
+			for (unsigned i = 0; i < messages_to_recv; i++) {
+				data[i] = ch->data.front();
+				ch->data.pop_front();
+			}
+
+			if (!ch->data.empty()) {
+				wakeup_queue_wakeup_first(&ch->recv_queue);
+			}
             wakeup_queue_wakeup_first(&ch->send_queue);
-            return 0;
+
+            return messages_to_recv;
         }
 
         if (!blocking) {
@@ -268,13 +285,15 @@ coro_bus_channel_recv_internal(struct coro_bus *bus, int channel, unsigned *out,
 int
 coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 {
-	return coro_bus_channel_recv_internal(bus, channel, data, true);
+	int ret = coro_bus_channel_recv_general(bus, channel, data, 1, true);
+	return ret == 1 ? 0 : ret;
 }
 
 int
 coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 {
-	return coro_bus_channel_recv_internal(bus, channel, data, false);
+	int ret = coro_bus_channel_recv_general(bus, channel, data, 1, false);
+	return ret == 1 ? 0 : ret;
 }
 
 
@@ -386,49 +405,25 @@ coro_bus_try_broadcast(struct coro_bus *bus, unsigned data)
 int
 coro_bus_send_v(struct coro_bus *bus, int channel, const unsigned *data, unsigned count)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)channel;
-	(void)data;
-	(void)count;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	return coro_bus_channel_send_general(bus, channel, data, count, true);
 }
 
 int
 coro_bus_try_send_v(struct coro_bus *bus, int channel, const unsigned *data, unsigned count)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)channel;
-	(void)data;
-	(void)count;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	return coro_bus_channel_send_general(bus, channel, data, count, false);
 }
 
 int
 coro_bus_recv_v(struct coro_bus *bus, int channel, unsigned *data, unsigned capacity)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)channel;
-	(void)data;
-	(void)capacity;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	return coro_bus_channel_recv_general(bus, channel, data, capacity, true);
 }
 
 int
 coro_bus_try_recv_v(struct coro_bus *bus, int channel, unsigned *data, unsigned capacity)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)bus;
-	(void)channel;
-	(void)data;
-	(void)capacity;
-	coro_bus_errno_set(CORO_BUS_ERR_NOT_IMPLEMENTED);
-	return -1;
+	return coro_bus_channel_recv_general(bus, channel, data, capacity, false);
 }
 
 #endif
