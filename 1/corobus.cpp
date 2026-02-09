@@ -305,83 +305,82 @@ coro_bus_broadcast_unsafe(struct coro_bus *bus, unsigned data)
 	}
 }
 
+/**
+ * Check if all channels in the bus are available for broadcast.
+ *
+ * @param bus Pointer to the coro_bus structure to check.
+ * @param out_first_full Pointer to store the first full channel pointer.
+ *                       Can be NULL if caller doesn't need the channel pointer.
+ *                       If a full channel is found, it will be dereferenced here.
+ *
+ * @return 0 if all open channels have space available (broadcast can proceed)
+ *        -1 if broadcast cannot proceed. Sets coro_bus_errno to:
+ *           - CORO_BUS_ERR_NO_CHANNEL: if no channels are open
+ *           - CORO_BUS_ERR_WOULD_BLOCK: if at least one channel is full
+ *                                       (out_first_full will contain that channel)
+ */
 static int
-coro_bus_find_first_full_channel(struct coro_bus *bus) 
+coro_bus_check_broadcast_availability(struct coro_bus *bus, struct coro_bus_channel **out_first_full)
 {
-	bool have_open_channels = false;
-	for (int i = 0; i < bus->channel_count; i++) {
-		struct coro_bus_channel *ch = bus->channels[i];
-		if (ch == NULL) {
-			continue;
-		}
-		have_open_channels = true;
-		
-		if (ch->data.size() >= ch->size_limit) {
-			return i;
-		}
-	}
-	if (!have_open_channels) {
-		return -1;
-	}
-	return bus->channel_count;
+    bool has_open_channels = false;
+    
+    for (int i = 0; i < bus->channel_count; i++) {
+        struct coro_bus_channel *ch = bus->channels[i];
+        if (ch == NULL) {
+            continue;
+        }
+        has_open_channels = true;
+        
+        if (ch->data.size() >= ch->size_limit) {
+            if (out_first_full != NULL) {
+                *out_first_full = ch;
+            }
+            coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
+            return -1;
+        }
+    }
+    
+    if (!has_open_channels) {
+        coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+        return -1;
+    }
+    
+    return 0;
 }
 
-/**
- * Send the given message to all the registered channels at once.
- * If any of the channels are full, then the message isn't sent
- * anywhere, and the coroutine is suspended until can submit the
- * data to all the channels.
- * @param bus Bus where the channels are located.
- * @param data Data to send.
- *
- * @retval 0 Success. Sent to all the channels.
- * @retval -1 Error. Check coro_bus_errno() for reason.
- *     - CORO_BUS_ERR_NO_CHANNEL - no channels in the bus.
- */
 int
 coro_bus_broadcast(struct coro_bus *bus, unsigned data)
 {	
 	for (;;) {
-		int full_channel_index = coro_bus_find_first_full_channel(bus);
-		if (full_channel_index == -1) {
-			coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-			return -1;
-		}
 
-		if (full_channel_index < bus->channel_count) {
-			struct coro_bus_channel *ch = bus->channels[full_channel_index];
-			wakeup_queue_suspend_this(&ch->send_queue);
-		} else {
+		struct coro_bus_channel *first_full;
+		int ret = coro_bus_check_broadcast_availability(bus, &first_full);
+		if (ret == 0) {
+			// All channels are available, can broadcast.
 			break;
 		}
+
+		if (coro_bus_errno() == CORO_BUS_ERR_NO_CHANNEL) {
+			return -1;
+		}
+		assert(coro_bus_errno() == CORO_BUS_ERR_WOULD_BLOCK);
+		assert(first_full != NULL);
+		wakeup_queue_suspend_this(&first_full->send_queue);
 	}
 
 	coro_bus_broadcast_unsafe(bus, data);
 	return 0;
 }
 
-/**
- * Same as coro_bus_broadcast(), but if any of the channels are
- * full, it instantly returns, not suspends.
- * @param bus  Bus where the channels are located.
- * @param data Data to send.
- *
- * @retval 0 Success. Sent to all the channels.
- * @retval -1 Error. Check coro_bus_errno() for reason.
- *     - CORO_BUS_ERR_NO_CHANNEL - no channels in the bus.
- *     - CORO_BUS_ERR_WOULD_BLOCK - at least one channel is full.
- */
 int
 coro_bus_try_broadcast(struct coro_bus *bus, unsigned data)
 {
-	int full_channel_index = coro_bus_find_first_full_channel(bus);
-	if (full_channel_index == -1) {
-		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-		return -1;
-	}
-
-	if (full_channel_index < bus->channel_count) {
-		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
+	int ret = coro_bus_check_broadcast_availability(bus, NULL);
+	if (ret < 0) {
+		assert(
+			coro_bus_errno() == CORO_BUS_ERR_WOULD_BLOCK || 
+			coro_bus_errno() == CORO_BUS_ERR_NO_CHANNEL
+		);
 		return -1;
 	}
 	
