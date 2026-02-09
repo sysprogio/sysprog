@@ -167,10 +167,7 @@ coro_bus_channel_close(struct coro_bus *bus, int channel)
 	 */
 
 	struct coro_bus_channel *ch = bus->channels[channel];
-	if (ch == NULL) {
-		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-		// return -1;
-	}
+	assert(ch != NULL);
 
 	bus->channels[channel] = NULL;
 
@@ -187,6 +184,31 @@ coro_bus_channel_close(struct coro_bus *bus, int channel)
 	delete ch;
 }
 
+static int
+coro_bus_channel_send_general(struct coro_bus *bus, int channel, unsigned data, bool blocking)
+{
+    for (;;) {
+        struct coro_bus_channel *ch = bus->channels[channel];
+        if (ch == NULL) {
+            coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+            return -1;
+        }
+
+        if (ch->data.size() < ch->size_limit) {
+            ch->data.push_back(data);
+            wakeup_queue_wakeup_first(&ch->recv_queue);
+            return 0;
+        }
+
+        if (!blocking) {
+            coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
+            return -1;
+        }
+
+        wakeup_queue_suspend_this(&ch->send_queue);
+    }
+}
+
 int
 coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 {
@@ -201,20 +223,7 @@ coro_bus_send(struct coro_bus *bus, int channel, unsigned data)
 	 * waiting, they would then wake each other up one by one
 	 * as lone as there is still space.
 	 */
-	for (;;) {
-		struct coro_bus_channel *ch = bus->channels[channel];
-		if (ch == NULL) {
-			coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-			return -1;
-		}
-
-		if (ch->data.size() < ch->size_limit) {
-			ch->data.push_back(data);
-			wakeup_queue_wakeup_first(&ch->recv_queue);
-			return 0;
-		}
-		wakeup_queue_suspend_this(&ch->send_queue);
-	}
+	return coro_bus_channel_send_general(bus, channel, data, true);
 }
 
 int
@@ -225,65 +234,47 @@ coro_bus_try_send(struct coro_bus *bus, int channel, unsigned data)
 	 * Wakeup the first coro in the recv-queue! To let it know
 	 * there is data.
 	 */
-	struct coro_bus_channel *ch = bus->channels[channel];
-	if (ch == NULL) {
-		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-		return -1;
-	}
+	return coro_bus_channel_send_general(bus, channel, data, false);
+}
 
-	if (ch->data.size() >= ch->size_limit) {
-		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
-		return -1;
-	}
-	ch->data.push_back(data);
+static int
+coro_bus_channel_recv_internal(struct coro_bus *bus, int channel, unsigned *out, bool blocking)
+{
+    assert(out != NULL);
 
-	wakeup_queue_wakeup_first(&ch->recv_queue);
-	return 0;
+    for (;;) {
+        struct coro_bus_channel *ch = bus->channels[channel];
+        if (ch == NULL) {
+            coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
+            return -1;
+        }
+
+        if (!ch->data.empty()) {
+            *out = ch->data.front();
+            ch->data.pop_front();
+            wakeup_queue_wakeup_first(&ch->send_queue);
+            return 0;
+        }
+
+        if (!blocking) {
+            coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
+            return -1;
+        }
+
+        wakeup_queue_suspend_this(&ch->recv_queue);
+    }
 }
 
 int
 coro_bus_recv(struct coro_bus *bus, int channel, unsigned *data)
 {
-	assert(data != NULL);
-
-	for (;;) {
-		struct coro_bus_channel *ch = bus->channels[channel];
-		if (ch == NULL) {
-			coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-			return -1;
-		}
-
-		if (!ch->data.empty()) {
-			*data = std::move(ch->data.front());
-			ch->data.pop_front();
-			wakeup_queue_wakeup_first(&ch->send_queue);
-			return 0;
-		}
-		wakeup_queue_suspend_this(&ch->recv_queue);
-	}
+	return coro_bus_channel_recv_internal(bus, channel, data, true);
 }
 
 int
 coro_bus_try_recv(struct coro_bus *bus, int channel, unsigned *data)
 {
-	assert(data != NULL);
-
-	struct coro_bus_channel *ch = bus->channels[channel];
-	if (ch == NULL) {
-		coro_bus_errno_set(CORO_BUS_ERR_NO_CHANNEL);
-		return -1;
-	}
-
-	if (ch->data.empty()) {
-		coro_bus_errno_set(CORO_BUS_ERR_WOULD_BLOCK);
-		return -1;
-	}
-	*data = std::move(ch->data.front());
-	ch->data.pop_front();
-
-	wakeup_queue_wakeup_first(&ch->send_queue);
-
-	return 0;
+	return coro_bus_channel_recv_internal(bus, channel, data, false);
 }
 
 
