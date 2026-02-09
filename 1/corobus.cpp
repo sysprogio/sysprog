@@ -138,7 +138,6 @@ coro_bus_channel_open(struct coro_bus *bus, size_t size_limit)
 			return i;
 		}
 	}
-	// assert(false);
 	return -1;
 }
 
