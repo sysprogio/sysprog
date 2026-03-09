@@ -253,8 +253,6 @@ struct filedesc {
 	size_t pos = 0;
 };
 
-
-
 /**
  * An array of file descriptors. When a file descriptor is
  * created, its pointer drops here. When a file descriptor is
@@ -336,6 +334,12 @@ ufs_write(int fd, const char *buf, size_t size)
 		return -1;
 	}
 
+
+	if ((fdesc->flags & open_flags::UFS_READ_WRITE) == open_flags::UFS_READ_ONLY) {
+		ufs_error_code = UFS_ERR_NO_PERMISSION;
+		return -1;
+	}
+
 	if (size == 0) {
 		return 0;
 	}
@@ -357,6 +361,11 @@ ufs_read(int fd, char *buf, size_t size)
 	struct filedesc *fdesc = filedescs_get(fd);
 	if (fdesc == NULL) {
 		ufs_error_code = UFS_ERR_NO_FILE;
+		return -1;
+	}
+
+	if ((fdesc->flags & open_flags::UFS_READ_WRITE) == open_flags::UFS_WRITE_ONLY) {
+		ufs_error_code = UFS_ERR_NO_PERMISSION;
 		return -1;
 	}
 

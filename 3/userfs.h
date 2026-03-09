@@ -23,7 +23,7 @@
  * It is important to define these macros here, in the header,
  * because it is used by tests.
  */
-#define NEED_OPEN_FLAGS 0
+#define NEED_OPEN_FLAGS 1
 #define NEED_RESIZE 0
 
 /**
