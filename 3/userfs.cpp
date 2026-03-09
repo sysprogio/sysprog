@@ -35,7 +35,7 @@ block_write(struct block *b, size_t start, const char *buf, size_t size)
 
 	size_t to_write = std::min(size, BLOCK_SIZE - start);
 	memcpy(b->memory + start, buf, to_write);
-	b->size += size;
+	b->size += to_write;
 
 	return to_write;
 }
@@ -65,7 +65,7 @@ struct file {
 
 	/* PUT HERE OTHER MEMBERS */
 	bool unlinked = false;
-	size_t block_num;
+	size_t block_num = 0;
 };
 
 static struct block*
@@ -120,7 +120,7 @@ file_read(struct file *f, size_t *position, char *buf, size_t size)
 		}
 
 		b = rlist_next_entry(b, in_block_list);
-		if (!b) {
+		if (rlist_entry_is_head(b, &f->blocks, in_block_list)) {
 			// No next block.
 			return total_bytes_read;
 		}
@@ -177,7 +177,7 @@ file_write(struct file *f, size_t position, const char *buf, size_t size)
 			return position;
 		}
 
-		if (!file_add_block(f)) {
+		if (file_add_block(f) != 0) {
 			return 0;
 		}
 		b = rlist_next_entry(b, in_block_list);
@@ -210,8 +210,8 @@ file_destroy(struct file* f)
 {
 	assert(f);
 
-	struct block *b;
-	rlist_foreach_entry(b, &f->blocks, in_block_list) {
+	struct block *b, *tmp;
+	rlist_foreach_entry_safe(b, &f->blocks, in_block_list, tmp) {
 		delete b;
 	}
 
@@ -234,8 +234,8 @@ static void
 file_try_remove(struct file *f) 
 {
 	if (f->refs == 0) {
-		file_destroy(f);
 		rlist_del_entry(f, in_file_list);
+		file_destroy(f);
 	}
 }
 
@@ -256,8 +256,8 @@ file_release(struct file *f)
 static void
 files_clear_all() 
 {
-	struct file *f;
-	rlist_foreach_entry(f, &file_list, in_file_list) {
+	struct file *f, *tmp;
+	rlist_foreach_entry_safe(f, &file_list, in_file_list, tmp) {
 		file_destroy(f);
 	}
 	rlist_create(&file_list);
