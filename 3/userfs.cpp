@@ -12,7 +12,7 @@ enum {
 };
 
 /** Global error code. Set from any function on any error. */
-static ufs_error_code ufs_error_code = UFS_ERR_NO_ERR;
+static enum ufs_error_code ufs_error_code = UFS_ERR_NO_ERR;
 
 struct block {
 	/** Block memory. */

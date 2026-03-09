@@ -67,7 +67,7 @@ enum ufs_error_code {
 };
 
 /** Get code of the last error. */
-ufs_error_code
+enum ufs_error_code
 ufs_errno();
 
 /**
