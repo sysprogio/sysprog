@@ -156,7 +156,7 @@ file_write(struct file *f, size_t position, const char *buf, size_t size)
 
 	assert(cur_block_ind <= f->block_num);
 	if (cur_block_ind == f->block_num) {
-		if (!file_add_block(f)) {
+		if (file_add_block(f) != 0) {
 			return 0;
 		}
 	}
@@ -269,8 +269,7 @@ struct filedesc {
 	int flags;
 
 	// Position in block.
-	size_t pos;
-
+	size_t pos = 0;
 };
 
 // static void 
