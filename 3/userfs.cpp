@@ -345,7 +345,7 @@ filedescs_get_safe(int fd, struct filedesc** fdesc) {
 	}
 	
 	*fdesc = file_descriptors[fd];
-	if (!fdesc) {
+	if (!(*fdesc)) {
 		return -1;
 	}
 
