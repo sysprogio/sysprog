@@ -410,19 +410,88 @@ ufs_delete(const char *filename)
 	return 0;
 }
 
-#if NEED_RESIZE
+static size_t
+file_get_size(struct file *f)
+{
+	if (f->block_num == 0)
+		return 0;
+	struct block *last = rlist_last_entry(&f->blocks, block, in_block_list);
+	return (f->block_num - 1) * BLOCK_SIZE + last->size;
+}
 
 int
 ufs_resize(int fd, size_t new_size)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)fd;
-	(void)new_size;
-	ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-	return -1;
-}
+	struct filedesc *fdesc = filedescs_get(fd);
+	if (fdesc == NULL) {
+		ufs_error_code = UFS_ERR_NO_FILE;
+		return -1;
+	}
 
-#endif
+	if ((fdesc->flags & UFS_READ_WRITE) == UFS_READ_ONLY) {
+		ufs_error_code = UFS_ERR_NO_PERMISSION;
+		return -1;
+	}
+
+	struct file *f = fdesc->atfile;
+	size_t cur_size = file_get_size(f);
+	if (new_size == cur_size)
+		return 0;
+
+	if (new_size > cur_size) {
+		if (new_size > MAX_FILE_SIZE) {
+			ufs_error_code = UFS_ERR_NO_MEM;
+			return -1;
+		}
+		size_t blocks_needed = (new_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+		if (f->block_num > 0 && f->block_num < blocks_needed) {
+			struct block *last = rlist_last_entry(&f->blocks, block, in_block_list);
+			last->size = BLOCK_SIZE;
+		}
+
+		while (f->block_num < blocks_needed) {
+			if (file_add_block(f) != 0) {
+				ufs_error_code = UFS_ERR_NO_MEM;
+				return -1;
+			}
+			struct block *nb = rlist_last_entry(&f->blocks, block, in_block_list);
+			nb->size = BLOCK_SIZE;
+		}
+
+		struct block *last = rlist_last_entry(&f->blocks, block, in_block_list);
+		size_t last_size = new_size % BLOCK_SIZE;
+		last->size = (last_size == 0) ? (size_t)BLOCK_SIZE : last_size;
+	} else {
+		if (new_size == 0) {
+			struct block *b, *tmp;
+			rlist_foreach_entry_safe(b, &f->blocks, in_block_list, tmp) {
+				rlist_del_entry(b, in_block_list);
+				delete b;
+			}
+			f->block_num = 0;
+		} else {
+			size_t blocks_needed = (new_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+			while (f->block_num > blocks_needed) {
+				struct block *last = rlist_last_entry(&f->blocks, block, in_block_list);
+				rlist_del_entry(last, in_block_list);
+				delete last;
+				f->block_num--;
+			}
+			struct block *last = rlist_last_entry(&f->blocks, block, in_block_list);
+			size_t last_size = new_size % BLOCK_SIZE;
+			last->size = (last_size == 0) ? (size_t)BLOCK_SIZE : last_size;
+		}
+
+		for (size_t i = 0; i < file_descriptors.size(); i++) {
+			struct filedesc *d = file_descriptors[i];
+			if (d != NULL && d->atfile == f && d->pos > new_size)
+				d->pos = new_size;
+		}
+	}
+
+	return 0;
+}
 
 void
 ufs_destroy(void)
