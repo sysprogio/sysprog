@@ -68,6 +68,20 @@ struct file {
 	size_t block_num;
 };
 
+static struct block*
+file_get_block(struct file *f, size_t block_ind)
+{
+	struct block *b = rlist_first_entry(&f->blocks, block, in_block_list);
+	
+	// Skip blocks.
+	for (size_t i = 0; i < block_ind; i++) {
+		b = rlist_next_entry(b, in_block_list);
+		assert(b);
+	}
+
+	return b;
+}
+
 static ssize_t
 file_read(struct file *f, size_t *position, char *buf, size_t size)
 {
@@ -100,7 +114,6 @@ file_read(struct file *f, size_t *position, char *buf, size_t size)
 			return total_bytes_read;
 		}
 
-		assert(size >= 0);
 		if (size == 0) {
 			// All read.
 			return total_bytes_read;
@@ -117,20 +130,6 @@ file_read(struct file *f, size_t *position, char *buf, size_t size)
 
 		cur_block_postiton = 0;
 	}
-}
-
-static struct block*
-file_get_block(struct file *f, size_t block_ind)
-{
-	struct block *b = rlist_first_entry(&f->blocks, block, in_block_list);
-	
-	// Skip blocks.
-	for (size_t i = 0; i < block_ind; i++) {
-		b = rlist_next_entry(b, in_block_list);
-		assert(b);
-	}
-
-	return b;
 }
 
 static int
@@ -173,7 +172,6 @@ file_write(struct file *f, size_t position, const char *buf, size_t size)
 		size -= written;
 		position += written;
 
-		assert(size >= 0);
 		if (size == 0) {
 			// All written.
 			return position;
@@ -199,16 +197,6 @@ file_write(struct file *f, size_t position, const char *buf, size_t size)
  * without having to know their iterator.
  */
 static rlist file_list = RLIST_HEAD_INITIALIZER(file_list);
-
-static void
-files_clear_all() 
-{
-	struct file *f;
-	rlist_foreach_entry(f, &file_list, in_file_list) {
-		file_destroy(f);
-	}
-	rlist_create(&file_list);
-}
 
 static void 
 file_init(struct file *f, const char *filename) 
@@ -265,6 +253,16 @@ file_release(struct file *f)
 	}
 }
 
+static void
+files_clear_all() 
+{
+	struct file *f;
+	rlist_foreach_entry(f, &file_list, in_file_list) {
+		file_destroy(f);
+	}
+	rlist_create(&file_list);
+}
+
 struct filedesc {
 	file *atfile;
 	/* PUT HERE OTHER MEMBERS */
@@ -310,7 +308,7 @@ static std::vector<filedesc*> file_descriptors;
 static int
 filedescs_new(struct file* const f, int flags)
 {
-	filedesc* fdesc = new filedesc;
+	struct filedesc* fdesc = new filedesc;
 	fdesc->atfile = f;
 	fdesc->flags = flags;
 	file_acquire(f);
@@ -338,6 +336,20 @@ filedescs_clear() {
 		delete file_descriptors[i];
 	}
 	std::vector<filedesc*>().swap(file_descriptors);
+}
+
+static int
+filedescs_get_safe(int fd, struct filedesc** fdesc) {
+	if (fd < 0 || static_cast<size_t>(fd) >= file_descriptors.size()) {
+		return -1;
+	}
+	
+	*fdesc = file_descriptors[fd];
+	if (!fdesc) {
+		return -1;
+	}
+
+	return 0;
 }
 
 // static void
@@ -379,7 +391,7 @@ ufs_open(const char *filename, int flags)
 	}
 
 	// Create new file;
-	struct file *f = new file;
+	f = new file;
 	file_init(f, filename);
 
 	return filedescs_new(f, flags);
@@ -393,8 +405,8 @@ ufs_write(int fd, const char *buf, size_t size)
 	// (void)buf;
 	// (void)size;
 	// ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-	filedesc* fdesc = file_descriptors[fd];
-	if (!fdesc) {
+	struct filedesc* fdesc = NULL;
+	if (filedescs_get_safe(fd, &fdesc) != 0) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
@@ -417,8 +429,8 @@ ufs_write(int fd, const char *buf, size_t size)
 ssize_t
 ufs_read(int fd, char *buf, size_t size)
 {
-	filedesc* fdesc = file_descriptors[fd];
-	if (!fdesc) {
+	struct filedesc* fdesc = NULL;
+	if (filedescs_get_safe(fd, &fdesc) != 0) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
@@ -440,8 +452,8 @@ ufs_close(int fd)
 	// (void)fd;
 	// ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
 
-	filedesc* fdesc = file_descriptors[fd];
-	if (!fdesc) {
+	struct filedesc* fdesc;
+	if (filedescs_get_safe(fd, &fdesc) != 0) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
@@ -476,7 +488,7 @@ ufs_delete(const char *filename)
 	f->unlinked = true;
 	file_try_remove(f);
 
-	return -1;
+	return 0;
 }
 
 #if NEED_RESIZE
