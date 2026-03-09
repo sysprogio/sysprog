@@ -35,7 +35,7 @@ block_write(struct block *b, size_t start, const char *buf, size_t size)
 
 	size_t to_write = std::min(size, BLOCK_SIZE - start);
 	memcpy(b->memory + start, buf, to_write);
-	b->size += to_write;
+	b->size = std::max(b->size, start + to_write);
 
 	return to_write;
 }
