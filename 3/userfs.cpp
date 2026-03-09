@@ -96,39 +96,29 @@ file_read(struct file *f, size_t *position, char *buf, size_t size)
 	}
 
 	struct block *b = file_get_block(f, cur_block_ind);
-	size_t cur_block_postiton = *position % BLOCK_SIZE;
-	if (b->size == cur_block_postiton) {
-		// EOF.
+	size_t cur_block_pos = *position % BLOCK_SIZE;
+	if (b->size == cur_block_pos)
 		return 0;
-	}
 
 	for (;;) {
-		size_t bytes_read = block_read(b, cur_block_postiton, buf, size);
+		size_t bytes_read = block_read(b, cur_block_pos, buf, size);
 
 		total_bytes_read += bytes_read;
 		*position += bytes_read;
 
-		// Check for eof.
-		if (bytes_read < b->size - cur_block_postiton) {
-			// Eof.
+		if (bytes_read < b->size - cur_block_pos)
 			return total_bytes_read;
-		}
 
-		if (size == 0) {
-			// All read.
+		if (size == 0)
 			return total_bytes_read;
-		}
 
 		b = rlist_next_entry(b, in_block_list);
-		if (rlist_entry_is_head(b, &f->blocks, in_block_list)) {
-			// No next block.
+		if (rlist_entry_is_head(b, &f->blocks, in_block_list))
 			return total_bytes_read;
-		}
 
 		buf += bytes_read;
 		size -= bytes_read;
-
-		cur_block_postiton = 0;
+		cur_block_pos = 0;
 	}
 }
 
@@ -163,33 +153,25 @@ file_write(struct file *f, size_t position, const char *buf, size_t size)
 
 	struct block *b = file_get_block(f, cur_block_ind);
 
-	size_t cur_block_postiton = position % BLOCK_SIZE;
+	size_t cur_block_pos = position % BLOCK_SIZE;
 
 	for (;;) {
-		size_t written = block_write(b, cur_block_postiton, buf, size);
+		size_t written = block_write(b, cur_block_pos, buf, size);
 		
 		buf += written;
 		size -= written;
 		position += written;
 
-		if (size == 0) {
-			// All written.
+		if (size == 0)
 			return position;
-		}
 
-		if (file_add_block(f) != 0) {
+		if (file_add_block(f) != 0)
 			return 0;
-		}
-		b = rlist_next_entry(b, in_block_list);
 
-		cur_block_postiton = 0;
+		b = rlist_next_entry(b, in_block_list);
+		cur_block_pos = 0;
 	}
 }
-
-// postition = 513, size = 1023
-// 0   1   2   3 .. 511 (skip)
-// 512 513 .. 1023
-// 1024
 
 /**
  * Intrusive list of all files. In this case the intrusiveness of the list also
@@ -268,17 +250,10 @@ struct filedesc {
 	/* PUT HERE OTHER MEMBERS */
 	int flags;
 
-	// Position in block.
 	size_t pos = 0;
 };
 
-// static void 
-// filedesc_destroy(struct filedesc* fdesc) 
-// {
-// 	assert(fdesc);
-// 	file_destroy(fdesc->atfile);
-// 	delete fdesc->atfile;
-// }
+
 
 /**
  * An array of file descriptors. When a file descriptor is
@@ -288,45 +263,25 @@ struct filedesc {
  */
 static std::vector<filedesc*> file_descriptors;
 
-// static struct filedesc*
-// filedescs_get_by_name(const char *filename) 
-// {
-// 	for (size_t i = 0; i < file_descriptors.size(); i++) {
-// 		filedesc* fdesc = file_descriptors[i];
-// 		if (!fdesc || fdesc->deleted) {
-// 			continue;
-// 		}
 
-// 		if (fdesc->atfile->name == filename) {
-// 			return fdesc;
-// 		}
-// 	}
-// 	return NULL;
-// }
 
 static int
-filedescs_new(struct file* const f, int flags)
+filedescs_new(struct file *f, int flags)
 {
-	struct filedesc* fdesc = new filedesc;
+	struct filedesc *fdesc = new filedesc;
 	fdesc->atfile = f;
 	fdesc->flags = flags;
 	file_acquire(f);
 
-	size_t i = 0;
-	for (; i < file_descriptors.size(); i++) {
-		if (file_descriptors[i]) {
-			continue;
+	for (size_t i = 0; i < file_descriptors.size(); i++) {
+		if (file_descriptors[i] == NULL) {
+			file_descriptors[i] = fdesc;
+			return i;
 		}
-
-		// fdesc->fd = i;
-		file_descriptors[i] = fdesc;
-		return i;
 	}
-	
-	// fdesc->fd = i;
-	file_descriptors.push_back(fdesc);
 
-	return i;
+	file_descriptors.push_back(fdesc);
+	return file_descriptors.size() - 1;
 }
 
 static void
@@ -337,31 +292,15 @@ filedescs_clear() {
 	std::vector<filedesc*>().swap(file_descriptors);
 }
 
-static int
-filedescs_get_safe(int fd, struct filedesc** fdesc) {
-	if (fd < 0 || static_cast<size_t>(fd) >= file_descriptors.size()) {
-		return -1;
-	}
-	
-	*fdesc = file_descriptors[fd];
-	if (!(*fdesc)) {
-		return -1;
-	}
-
-	return 0;
+static struct filedesc *
+filedescs_get(int fd)
+{
+	if (fd < 0 || (size_t)fd >= file_descriptors.size())
+		return NULL;
+	return file_descriptors[fd];
 }
 
-// static void
-// filedescs_try_remove(int fd) 
-// {
-// 	struct filedesc* fdesc = file_descriptors[fd];
-// 	assert(fdesc);
 
-// 	if (file_is_released(fdesc->atfile)) {
-// 		delete fdesc;
-// 		file_descriptors[fd] = NULL;
-// 	}
-// }
 
 enum ufs_error_code
 ufs_errno()
@@ -372,13 +311,6 @@ ufs_errno()
 int
 ufs_open(const char *filename, int flags)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	// (void)filename;
-	// (void)flags;
-	// (void)file_list;
-	// (void)file_descriptors;
-	// ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-
 	struct file *f = file_find(filename);
 	if (f) {
 		return filedescs_new(f, flags);
@@ -389,7 +321,6 @@ ufs_open(const char *filename, int flags)
 		return -1;
 	}
 
-	// Create new file;
 	f = new file;
 	file_init(f, filename);
 
@@ -399,13 +330,8 @@ ufs_open(const char *filename, int flags)
 ssize_t
 ufs_write(int fd, const char *buf, size_t size)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	// (void)fd;
-	// (void)buf;
-	// (void)size;
-	// ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-	struct filedesc* fdesc = NULL;
-	if (filedescs_get_safe(fd, &fdesc) != 0) {
+	struct filedesc *fdesc = filedescs_get(fd);
+	if (fdesc == NULL) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
@@ -428,8 +354,8 @@ ufs_write(int fd, const char *buf, size_t size)
 ssize_t
 ufs_read(int fd, char *buf, size_t size)
 {
-	struct filedesc* fdesc = NULL;
-	if (filedescs_get_safe(fd, &fdesc) != 0) {
+	struct filedesc *fdesc = filedescs_get(fd);
+	if (fdesc == NULL) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
@@ -438,32 +364,21 @@ ufs_read(int fd, char *buf, size_t size)
 		return 0;
 	}
 
-	struct file *f = fdesc->atfile;
-
-	ssize_t bytes_read = file_read(f, &fdesc->pos, buf, size);
-	return bytes_read;
+	return file_read(fdesc->atfile, &fdesc->pos, buf, size);
 }
 
 int
 ufs_close(int fd)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	// (void)fd;
-	// ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-
-	struct filedesc* fdesc;
-	if (filedescs_get_safe(fd, &fdesc) != 0) {
+	struct filedesc *fdesc = filedescs_get(fd);
+	if (fdesc == NULL) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
 
-	struct file *f = fdesc->atfile;
-	assert(f);
-
-	file_release(f);
-	if (f->unlinked) {
-		file_try_remove(f);
-	}
+	file_release(fdesc->atfile);
+	if (fdesc->atfile->unlinked)
+		file_try_remove(fdesc->atfile);
 
 	delete fdesc;
 	file_descriptors[fd] = NULL;
@@ -474,10 +389,6 @@ ufs_close(int fd)
 int
 ufs_delete(const char *filename)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	// (void)filename;
-	// ufs_error_code = UFS_ERR_NOT_IMPLEMENTED;
-
 	struct file *f = file_find(filename);
 	if (!f) {
 		ufs_error_code = UFS_ERR_NO_FILE;
